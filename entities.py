@@ -1,81 +1,89 @@
-import pygame, input_manager, sprite_manager
+import pygame, input_manager
 
 class Entity(pygame.Rect):
-    def __init__(self, x, y, w, h):
-        super().__init__(x, y, w, h)
+    def __init__(self, pos_x, pos_y, width, height):
+        super().__init__(pos_x, pos_y, width, height)
         self.velocity = [0, 0]
-        self.collision_check_steps = 5
-        self.is_on_floor = False
-        self.is_on_roof = False
-        self.is_on_left_wall = False
-        self.is_on_right_wall = False
+        self.move_steps = 20
+        self.on_left_wall = False
+        self.on_right_wall = False
+        self.on_bottom_wall = False
+        self.on_top_wall = False
+    
+    def debug(self, velo:bool, on_walls:bool, pos:bool):
+        if velo:
+            print(f'v_x:{int(self.velocity[0])} v_y:{int(self.velocity[1])}')
+        if on_walls:
+            print(f'left_wall:{self.on_left_wall}   right_wall:{self.on_right_wall}   top_wall:{self.on_top_wall}   bottom_wall:{self.on_bottom_wall}')
+        if pos:
+            print(f'x:{int(self.left)} y:{int(self.top)}')
+    
+    def apply_gravity(self, gravity:int, weight:int=20):
+        if self.on_bottom_wall:
+            self.velocity[1] = 1
+        else:
+            self.velocity[1] += gravity * 0.01 
     
     def move_and_slide(self, rect_list:list[pygame.Rect]):
-        self.is_on_floor = False
-        self.is_on_roof = False
-        self.is_on_left_wall = False
-        self.is_on_right_wall = False
-        
-        for i in range(self.collision_check_steps):
-            x_rect = pygame.Rect(self.left, self.top, self.width, self.height)
-            x_rect.left += self.velocity[0] / (i+1)
-            x_coll = x_rect.collidelist(rect_list)
-            
-            if x_coll == -1:
-                self.left = x_rect.left
-                break
-            else:
-                if self.velocity[0] > 0:
-                    self.is_on_right_wall = True
-                if self.velocity[0] < 0:
-                    self.is_on_left_wall = True
+        last_x = self.left
+        last_y = self.top
     
-        for i in range(self.collision_check_steps):
-            y_rect = pygame.Rect(self.left, self.top, self.width, self.height)
-            y_rect.top += self.velocity[1] / (i+1)
-            y_coll = y_rect.collidelist(rect_list)
-            
-            if y_coll == -1:
-                self.top = y_rect.top
-                break
-            else:
-                if self.velocity[1] > 0:
-                    self.is_on_floor = True
-                if self.velocity[1] < 0:
-                    self.is_on_roof = True
+        check_rect = pygame.Rect(self.left, self.top, self.width, self.height)
+
+        x_step_size = self.velocity[0] / self.move_steps
+        y_step_size = self.velocity[1] / self.move_steps
+        
+        if self.velocity[0] != 0:
+            for x in range(self.move_steps):
+                check_rect.topleft = [self.left + (x_step_size*x), self.top]
+                if check_rect.collidelist(rect_list) >= 0:
+                    if self.velocity[0] > 0:
+                        self.on_right_wall = True
+                    if self.velocity[0] < 0:
+                        self.on_left_wall = True
+                    break
+                else:
+                    last_x = check_rect.left
+                    if x == self.move_steps-1:
+                        self.on_right_wall = False
+                        self.on_left_wall = False
+                    
+        
+        if self.velocity[1] != 0:
+            for y in range(self.move_steps):
+                check_rect.topleft = [last_x, self.top + (y_step_size*y)]
+                if check_rect.collidelist(rect_list) >= 0:
+                    if self.velocity[1] > 0:
+                        self.on_bottom_wall = True
+                    if self.velocity[1] < 0:
+                        self.on_top_wall = True
+                    break
+                else:
+                    last_y = check_rect.top
+                    if y == self.move_steps-1:
+                        self.on_top_wall = False
+                        self.on_bottom_wall = False
+        
+        self.topleft = [last_x, last_y]
 
 class Player(Entity):
-    def __init__(self, position:list, size:list, spriteHandler:sprite_manager.SpriteManager):
-        Entity.__init__(self, position[0], position[1], size[0], size[1])
-        self.speed = 250
-        self.jump_force = 320
-        self.collision_check_steps = self.speed // 25
-        self.sprite = spriteHandler.get_sprite('player')
-        self.sprite = pygame.transform.scale(self.sprite, [size[0], size[1]])
-        self.jumping = True
+    def __init__(self, pos_x:float, pos_y:float, width:int, height:int, speed:float, jump_force:float):
+        super().__init__(pos_x, pos_y, width, height)
+        self.speed = speed
+        self.jump_force = jump_force
     
-    def update(self, input:input_manager.InputManager, rect_list:list[pygame.Rect], delta:float, gravity:float):
-        input_dir_x = 0
-        if input.get_key_state(pygame.K_a): input_dir_x -= 1
-        if input.get_key_state(pygame.K_d): input_dir_x += 1
+    def update(self, rect_list:list[pygame.Rect], input:input_manager.InputManager, gravity:float):
+        input_dir_x = int(input.get_key_state(pygame.K_d)) - int(input.get_key_state(pygame.K_a))
+        self.velocity[0] = input_dir_x * self.speed
+        self.apply_gravity(gravity)
         
-        self.velocity = [input_dir_x * delta * self.speed, self.velocity[1]]
-        self.velocity[1] += gravity * delta
+        if self.on_bottom_wall and input.get_key_state(pygame.K_SPACE):
+            self.velocity[1] = -self.jump_force
+        
+        if self.velocity[1] < 0 and input.get_key_state(pygame.K_SPACE) == False:
+            self.velocity[1] += 2
+        
+        if self.on_top_wall:
+            self.velocity[1] += abs(self.velocity[1])
+        
         self.move_and_slide(rect_list)
-
-        if self.is_on_floor:
-            self.velocity[1] = 1
-            self.jumping = False
-            
-            if input.get_key_state(pygame.K_SPACE):
-                self.velocity[1] = -self.jump_force * 0.01
-                self.jumping = True
-        #else:
-        #    if self.velocity[1] < 0 and input.get_key_state(pygame.K_SPACE) == False and self.jumping:
-        #        self.velocity[1] += (self.jump_force/4) * delta
-
-        if self.is_on_roof:
-            self.velocity[1] += abs(self.velocity[1]) * delta * 100
-    
-    def draw(self, surf:pygame.Surface, offset:list):
-        surf.blit(self.sprite, [self.left + offset[0], self.top + offset[1]])
